@@ -1,0 +1,203 @@
+# Host workflow for every .tf file in .factory/.
+#
+# This file lives under github/ (no dot) so Actions does not run it in
+# the factory. A host copies it to .github/workflows/factory.yml, and
+# there it is that repository's own workflow. The name factory.yml keeps
+# it next to workflows the host wrote itself.
+#
+# Paths below are host paths, after that copy. OpenTofu runs with
+# .factory/ as its working directory, so plan and apply cover every .tf
+# file copied there.
+#
+# The passphrase is the host secret TF_STATE_PASSPHRASE. The token is
+# the host's GITHUB_TOKEN. There is no personal access token.
+
+name: Factory
+
+on:
+  pull_request:
+    paths:
+      - ".factory/**"
+      - "!.factory/state/**"
+      - ".github/workflows/factory.yml"
+  push:
+    # A branches filter cannot use an expression, so this listens to
+    # every branch. The apply job keeps only the default branch.
+    branches:
+      - "**"
+    paths:
+      - ".factory/**"
+      - "!.factory/state/**"
+      - ".github/workflows/factory.yml"
+  workflow_dispatch:
+
+# One queue per host, shared by plan and apply. An apply is not cancelled
+# to make room for the next run.
+concurrency:
+  group: factory-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    # A pull request from a fork does not receive the passphrase secret.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      issues: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_state_passphrase: ${{ secrets.TF_STATE_PASSPHRASE }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Require state passphrase
+        run: |
+          set -euo pipefail
+          if [ -z "${TF_VAR_state_passphrase}" ]; then
+            echo "The repository secret TF_STATE_PASSPHRASE is missing."
+            echo "Create it before planning or applying. See the factory README."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install OpenTofu 1.13.2
+        uses: opentofu/setup-opentofu@v2.0.2
+        with:
+          tofu_version: "1.13.2"
+          tofu_wrapper: false
+
+      - name: Init
+        working-directory: .factory
+        run: |
+          set -euo pipefail
+          # The factory ships no state/ directory. Apply creates the file.
+          # plan validates the configuration itself.
+          mkdir -p state
+          tofu init -input=false
+
+      - name: Plan
+        working-directory: .factory
+        run: tofu plan -input=false -no-color
+
+  apply:
+    # A push payload includes repository.default_branch. The documented
+    # workflow_dispatch payload is inputs, ref, and workflow. When that
+    # field is missing, this job still runs and the next step asks the
+    # API. Do not guess a branch name.
+    if: >-
+      (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
+      || (github.event_name == 'workflow_dispatch' && (!github.event.repository.default_branch || github.ref_name == github.event.repository.default_branch))
+    permissions:
+      contents: write
+      issues: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_state_passphrase: ${{ secrets.TF_STATE_PASSPHRASE }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Resolve the default branch
+        id: default-branch
+        env:
+          FROM_EVENT: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          branch="${FROM_EVENT}"
+          if [ -z "$branch" ]; then
+            echo "repository.default_branch is not in the event payload. Asking the API."
+            branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
+          fi
+          if [ -z "$branch" ] || [[ "$branch" == *$'\n'* ]] || [[ "$branch" == *' '* ]]; then
+            echo "Could not determine the default branch."
+            exit 1
+          fi
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+          echo "Default branch is ${branch}."
+
+      - name: Apply only on the default branch
+        env:
+          DEFAULT_BRANCH: ${{ steps.default-branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "apply is only allowed from the default branch ${DEFAULT_BRANCH} (got ${GITHUB_REF})."
+            exit 1
+          fi
+
+      - name: Require state passphrase
+        run: |
+          set -euo pipefail
+          if [ -z "${TF_VAR_state_passphrase}" ]; then
+            echo "The repository secret TF_STATE_PASSPHRASE is missing."
+            echo "Create it before planning or applying. See the factory README."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Install OpenTofu 1.13.2
+        uses: opentofu/setup-opentofu@v2.0.2
+        with:
+          tofu_version: "1.13.2"
+          tofu_wrapper: false
+
+      - name: Init
+        working-directory: .factory
+        run: |
+          set -euo pipefail
+          # The factory ships no state/ directory. Apply creates the file.
+          # apply validates the configuration itself.
+          mkdir -p state
+          tofu init -input=false
+
+      - name: Apply
+        working-directory: .factory
+        run: tofu apply -auto-approve -input=false -no-color
+
+      - name: Commit encrypted state on the default branch
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ steps.default-branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f .factory/state/terraform.tfstate ]; then
+            echo "OpenTofu did not write .factory/state/terraform.tfstate."
+            exit 1
+          fi
+
+          # This exact path only. -f so a host gitignore of *.tfstate*
+          # does not hide it. Backups and lock files stay untracked.
+          git add -f -- .factory/state/terraform.tfstate
+
+          if git diff --cached --quiet; then
+            echo "Encrypted state is unchanged. Nothing to commit."
+            exit 0
+          fi
+
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "Update encrypted OpenTofu state"
+
+          # The new commit's parent is the commit this job checked out.
+          parent="$(git rev-parse HEAD^)"
+          if [ "$parent" != "$EXPECTED_SHA" ]; then
+            echo "Refusing to push: parent ${parent} is not the checked-out commit ${EXPECTED_SHA}."
+            exit 1
+          fi
+
+          git push origin "HEAD:refs/heads/${DEFAULT_BRANCH}"

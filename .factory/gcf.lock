@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "source": "TigranOhanyan/github-cursor-factory",
+  "ref": "main",
+  "commit": "4e3e11be9af667106ed6a26356631ba0d246bf2e",
+  "files": [
+    {
+      "path": ".factory/.terraform.lock.hcl",
+      "sha256": "9beeedb2853295abb3e657a304d936e8f819cc7cf04f3d43a839868e8dbc2e4b"
+    },
+    {
+      "path": ".factory/apps/factory.json",
+      "sha256": "2e8157d5cc3f2df4b950be56d8cbbcd63a18a958d7e6a7d179e54ed5b0d3029f"
+    },
+    {
+      "path": ".factory/apps/reviewer-1.json",
+      "sha256": "4cf4ab9d84ed4b3193c75885d7491ab9b064bc641ac442f7b319238465325b3a"
+    },
+    {
+      "path": ".factory/apps/reviewer-2.json",
+      "sha256": "03953cd24154ccfd8fa6af4b1a3e1d905267ed315b026449de89cbf05afaf6f5"
+    },
+    {
+      "path": ".factory/labels.tf",
+      "sha256": "a49b9473f2c0bfa2d7cac931c32d5102dcd03d705d02229dad00a2469c99e383"
+    },
+    {
+      "path": ".factory/providers.tf",
+      "sha256": "69000e04385cd018e7b5a592d0cfe21045a3ecbce00462b0191568c2ecfcbc0b"
+    },
+    {
+      "path": ".factory/terraform.tf",
+      "sha256": "ad892bfd53a1a078293607ba89e64a9c0c3f01d401f2b4ac90fbb5de7549bce9"
+    },
+    {
+      "path": ".factory/tests/merge_fixtures.py",
+      "sha256": "4613c8f95b6710f06b1e761a3db0876360b8698818589d95126d2592251f1397"
+    },
+    {
+      "path": ".factory/variables.tf",
+      "sha256": "e7cca252b16cf851ffce31a94d64f735805fd56a69e22af825cfa24ca2aba3a9"
+    },
+    {
+      "path": ".github/workflows/build.yml",
+      "sha256": "1239cb809f5ada55d99694e164190e658c2356e7472a3781666bc2c8618f15e8"
+    },
+    {
+      "path": ".github/workflows/factory.yml",
+      "sha256": "e223ef340e3ab93617e6bf1d35eef98f10fec94e0f44e9e50e68d5ad3e4d2cc9"
+    },
+    {
+      "path": ".github/workflows/merge.yml",
+      "sha256": "7fea0d9df637aab12fe927d9b99ea2e81caa29436c0d9737d493727acf3c2295"
+    }
+  ]
+}

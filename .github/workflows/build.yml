@@ -1,0 +1,76 @@
+# Host workflow that claims refined issues and starts a Cursor cloud
+# agent for each one.
+#
+# This file lives under github/ (no dot) so Actions does not run it in
+# the factory. A host copies it to .github/workflows/build.yml, and
+# there it is that repository's own workflow. gh gcf pull copies every
+# file under github/workflows/ to the host's .github/workflows/.
+#
+# There is no checkout. gh gcf build talks to the GitHub API and the
+# Cursor API. It finds open issues labeled todo that do not have
+# in-progress or needs-attention, adds in-progress, and starts a cloud
+# agent for each. The agent opens a pull request as the owner of
+# CURSOR_API_KEY.
+#
+# GH_GCF_VERSION below is the only pin passed to
+# `gh extension install --pin`.
+#
+# One concurrency group, and the in-progress run is not cancelled, so
+# two runs do not claim the same issue.
+#
+# A missing CURSOR_API_KEY logs a notice and the run succeeds. A host
+# that has not created the secret does not fail every 10 minutes.
+# The key is never printed. A failed install or a failed `gh gcf build`
+# fails the run.
+
+name: Factory build
+
+# The only pin. `gh extension install --pin` uses this tag.
+env:
+  GH_GCF_VERSION: v0.2.0
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+# One queue. The running job finishes its claims before the next starts.
+concurrency:
+  group: factory-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    # One install, then one cloud-agent request per claimed issue.
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+      GCF_BUILDER_MODEL: ${{ vars.GCF_BUILDER_MODEL }}
+
+    steps:
+      - name: Build open todo issues
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CURSOR_API_KEY:-}" ]; then
+            echo "::notice::The repository secret CURSOR_API_KEY is not set. The build is skipped."
+            exit 0
+          fi
+
+          echo "Installing gh-gcf ${GH_GCF_VERSION}."
+          gh extension install TigranOhanyan/gh-gcf --pin "${GH_GCF_VERSION}"
+
+          # Pass the repository variable only when it has a value.
+          if [ -z "${GCF_BUILDER_MODEL:-}" ]; then
+            unset GCF_BUILDER_MODEL
+            echo "GCF_BUILDER_MODEL is unset."
+          else
+            echo "GCF_BUILDER_MODEL is set."
+          fi
+
+          gh gcf build --repo "$GITHUB_REPOSITORY"
